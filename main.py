@@ -20,3 +20,4 @@ _, prev=cap.read()
 
 prev_grey=cv.cvtColor(prev,cv.COLOR_BGR2GRAY)
 print("Hello check")
+print("Hi")
