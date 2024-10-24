@@ -19,3 +19,4 @@ out=cv.VideoWriter('Video output.mp4', fourcc,fps, (w,h))
 _, prev=cap.read()
 
 prev_grey=cv.cvtColor(prev,cv.COLOR_BGR2GRAY)
+print("Hello check")
