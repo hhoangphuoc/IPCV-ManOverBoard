@@ -92,8 +92,5 @@ for i in range(n_frame - 2):
 cap.release()
 out.release()
 cv.destroyAllWindows()
-=======
-prev_grey=cv.cvtColor(prev,cv.COLOR_BGR2GRAY)
-print("Hello check")
-print("Hi")
->>>>>>> 9e8d5bd0aa47fef50ce0d3b9d31567908fdb0663
+
+
