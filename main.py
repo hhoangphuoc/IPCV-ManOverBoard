@@ -1,6 +1,6 @@
 import cv2 as cv
 import numpy as np
-SMOOTHING_RADIUS = 50
+SMOOTHING_RADIUS = 30  # Reduced smoothing radius
 
 def movingAverage(curve, radius):
     window_size = 2 * radius + 1
@@ -16,9 +16,9 @@ def smooth(trajectory):
         smoothed_trajectory[:, i] = movingAverage(trajectory[:, i], radius=SMOOTHING_RADIUS)
     return smoothed_trajectory
 
-def fixBorder(frame):
+def fixBorder(frame, zoom_factor=1.1):  # Increase zoom factor to 1.1 (10% zoom)
     s = frame.shape
-    T = cv.getRotationMatrix2D((s[1] / 2, s[0] / 2), 0, 1.04)
+    T = cv.getRotationMatrix2D((s[1] / 2, s[0] / 2), 0, zoom_factor)
     frame = cv.warpAffine(frame, T, (s[1], s[0]))
     return frame
 
@@ -27,7 +27,7 @@ n_frame = int(cap.get(cv.CAP_PROP_FRAME_COUNT))
 w = int(cap.get(cv.CAP_PROP_FRAME_WIDTH))
 h = int(cap.get(cv.CAP_PROP_FRAME_HEIGHT))
 fps = int(cap.get(cv.CAP_PROP_FPS))
-fourcc = cv.VideoWriter_fourcc(*'MJPG')
+fourcc = cv.VideoWriter_fourcc(*'XVID')  # Change codec to XVID
 out = cv.VideoWriter('Video output.mp4', fourcc, fps, (w, h))
 
 _, prev = cap.read()
@@ -58,7 +58,7 @@ for i in range(n_frame - 2):
 trajectory = np.cumsum(transforms, axis=0)
 smoothed_trajectory = smooth(trajectory)
 difference = smoothed_trajectory - trajectory
-transforms_smooth = transforms + difference
+transforms_smooth = transforms + difference * 0.5  # Reduce adjustments
 
 cap.set(cv.CAP_PROP_POS_FRAMES, 0)
 
@@ -78,7 +78,7 @@ for i in range(n_frame - 2):
     m[1, 2] = dy
 
     frame_stabilized = cv.warpAffine(frame, m, (w, h))
-    frame_stabilized = fixBorder(frame_stabilized)
+    frame_stabilized = fixBorder(frame_stabilized, zoom_factor=1.1)  # Apply 10% zoom to reduce black borders
     frame_out = cv.hconcat([frame, frame_stabilized])
 
     if frame_out.shape[1] > 1920:
