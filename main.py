@@ -34,7 +34,7 @@ _, prev = cap.read()
 prev_gray = cv.cvtColor(prev, cv.COLOR_BGR2GRAY)
 transforms = np.zeros((n_frame - 1, 3), np.float32)
 
-<<<<<<< HEAD
+
 for i in range(n_frame - 2):
     prev_pts = cv.goodFeaturesToTrack(prev_gray, maxCorners=200, qualityLevel=0.01, minDistance=30, blockSize=30)
     success, curr = cap.read()
