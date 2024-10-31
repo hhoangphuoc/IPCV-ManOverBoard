@@ -1,98 +1,113 @@
 import cv2
 import numpy as np
 
-# Load the video
-cap = cv2.VideoCapture("input video.mp4")
-if not cap.isOpened():
-    print("Error: Could not open video.")
-    exit()
+filename = "input video.MP4"
+cap = cv2.VideoCapture(filename)
 
-# Get the original video properties for consistent output
-fps = cap.get(cv2.CAP_PROP_FPS)
-frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+# Video writer for stabilized output
+fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+out = cv2.VideoWriter("stabilized.mp4", fourcc, cap.get(cv2.CAP_PROP_FPS), (1280, 720))
 
-# Define the codec and create a VideoWriter object
-out = cv2.VideoWriter("output_video.mp4", cv2.VideoWriter_fourcc(*'mp4v'), fps, (frame_width, frame_height))
+# Parameters for template and search region
+template_orig = np.array([1100, 800])  # [x, y] upper left corner
+template_size = np.array([300, 50])    # [width, height]
+search_border = np.array([15, 10])     # max horizontal and vertical displacement
+template_center = (template_size - 1) // 2
+template_center_pos = template_orig + template_center - 1
+W, H = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-# Params for feature detection and tracking
-feature_params = dict(maxCorners=200, qualityLevel=0.05, minDistance=30, blockSize=3)
-lk_params = dict(winSize=(15, 15), maxLevel=2,
-                 criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
+# Border for stabilization
+BorderCols = np.r_[0:search_border[0] + 4, W - search_border[0] - 4:W]
+BorderRows = np.r_[0:search_border[1] + 4, H - search_border[1] - 4:H]
+sz = np.array([W, H])
 
-# Read the first frame
-ret, prev_frame = cap.read()
-if not ret:
-    print("Error: Could not read the first frame.")
-    exit()
-prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
-prev_pts = cv2.goodFeaturesToTrack(prev_gray, mask=None, **feature_params)
+# Initialize indices for template and search region
+TargetRowIndices = np.arange(template_orig[1] - 1, template_orig[1] + template_size[1] - 1)
+TargetColIndices = np.arange(template_orig[0] - 1, template_orig[0] + template_size[0] - 1)
+SearchRegion = template_orig - search_border - 1
+Offset = np.array([0, 0])
+Target = np.zeros((18, 22, 3), dtype=np.uint8)
+firstTime = True
 
-# Transformation accumulator for stabilization
-transforms = []
+# Update search function
+def update_search(sz, motion_vector, search_region, offset, pos):
+    A_i = offset - motion_vector
+    AbsTemplate = pos['template_orig'] - A_i
+    SearchTopLeft = AbsTemplate - pos['search_border']
+    SearchBottomRight = SearchTopLeft + pos['template_size'] + 2 * pos['search_border']
+    inbounds = np.all([(SearchTopLeft >= [0, 0]), (SearchBottomRight <= np.flip(sz))])
 
-while True:
-    ret, curr_frame = cap.read()
-    if not ret:
-        break
+    if inbounds:
+        mv_out = motion_vector
+    else:
+        mv_out = np.array([0, 0])
 
-    curr_gray = cv2.cvtColor(curr_frame, cv2.COLOR_BGR2GRAY)
-    curr_pts, status, _ = cv2.calcOpticalFlowPyrLK(prev_gray, curr_gray, prev_pts, None, **lk_params)
+    offset -= mv_out
+    search_region += mv_out
+    return offset, search_region
 
-    # Keep only good points
-    good_prev_pts = prev_pts[status == 1]
-    good_curr_pts = curr_pts[status == 1]
-
-    # Estimate the transformation
-    m, _ = cv2.estimateAffinePartial2D(good_prev_pts, good_curr_pts)
-    dx, dy = m[0, 2], m[1, 2]
-    da = np.arctan2(m[1, 0], m[0, 0])
-
-    # Store transformations
-    transforms.append([dx, dy, da])
-
-    prev_gray = curr_gray.copy()
-    prev_pts = good_curr_pts.reshape(-1, 1, 2)
-
-# Smooth transformations
-def smooth_trajectory(transforms, smoothing_radius=40):
-    smoothed_transforms = []
-    for i in range(len(transforms)):
-        start = max(0, i - smoothing_radius)
-        end = min(len(transforms) - 1, i + smoothing_radius)
-
-        avg_dx = np.mean([t[0] for t in transforms[start:end + 1]])
-        avg_dy = np.mean([t[1] for t in transforms[start:end + 1]])
-        avg_da = np.mean([t[2] for t in transforms[start:end + 1]])
-
-        smoothed_transforms.append([avg_dx, avg_dy, avg_da])
-
-    return smoothed_transforms
-
-smoothed_transforms = smooth_trajectory(transforms)
-
-# Reset the capture to the start
-cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-
-# Apply the smoothed transforms and write to output
-for i, (dx, dy, da) in enumerate(smoothed_transforms):
+# Read frames and process stabilization
+while cap.isOpened():
     ret, frame = cap.read()
     if not ret:
         break
 
-    # Create the transformation matrix with smoothed values
-    transform = np.array([[np.cos(da), -np.sin(da), dx],
-                          [np.sin(da), np.cos(da), dy]])
+    if firstTime:
+        Idx = template_center_pos.copy()
+        MotionVector = np.array([0, 0])
+        firstTime = False
+    else:
+        IdxPrev = Idx.copy()
+        x, y, w, h = *SearchRegion, *template_size + 2 * search_border
+        ROI = frame[y:y+h, x:x+w]
 
-    # Apply the transform to stabilize the frame
-    stabilized_frame = cv2.warpAffine(frame, transform, (frame.shape[1], frame.shape[0]))
+        # Template Matching in color
+        res = cv2.matchTemplate(ROI, Target, cv2.TM_CCOEFF_NORMED)
+        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
+        Idx = np.array(max_loc) + SearchRegion  # Adjust to full image coordinates
+        MotionVector = Idx - IdxPrev
 
-    # Write the stabilized frame to output video
-    out.write(stabilized_frame)
+    # Update Offset and SearchRegion
+    Offset, SearchRegion = update_search(sz, MotionVector, SearchRegion, Offset, {
+        'template_orig': template_orig,
+        'template_size': template_size,
+        'search_border': search_border
+    })
 
-    # Optional: Show the stabilized frame
-    cv2.imshow("Stabilized Frame", stabilized_frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+    # Translate frame for stabilization in color
+    M = np.float32([[1, 0, -Offset[0]], [0, 1, -Offset[1]]])
+    Stabilized = cv2.warpAffine(frame, M, (W, H))
+
+    # Extract target for next frame's matching
+    Target = Stabilized[TargetRowIndices[:, None], TargetColIndices]
+
+    # Add black border
+    Stabilized[:, BorderCols] = 0
+    Stabilized[BorderRows, :] = 0
+
+    # Draw rectangles on input to show target and search region
+    TargetRect = np.hstack((template_orig - Offset, template_size))
+    SearchRegionRect = np.hstack((SearchRegion, template_size + 2 * search_border))
+
+    input_frame = frame.copy()
+    input_frame = cv2.rectangle(input_frame, TargetRect[:2], TargetRect[:2] + TargetRect[2:], (255, 255, 255), 2)
+    input_frame = cv2.rectangle(input_frame, SearchRegionRect[:2], SearchRegionRect[:2] + SearchRegionRect[2:], (255, 255, 255), 2)
+
+    # Display Offset values
+    cv2.putText(input_frame, f"({Offset[0]:+05.1f},{Offset[1]:+05.1f})", (191, 215),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+
+    # Display video side by side: original and stabilized
+    combined_frame = np.hstack((input_frame, Stabilized))
+    resized_output = cv2.resize(combined_frame, (1280, 720))
+    video=cv2.resize(Stabilized, (1280, 720))
+    
+    cv2.imshow("Video Stabilization", resized_output)
+    
+    # Write stabilized output frame
+    out.write(video)
+
+    if cv2.waitKey(10) & 0xFF == ord('q'):
         break
 
 # Release resources
