@@ -5,20 +5,26 @@ AT THE TIMESTAMP OF 1 SECOND. THAT'S WHERE WE START THE TRACKING
 """
 import cv2
 
-INITIAL_BUOY_POSITION = (667, 487) # initial point position
+INITIAL_BUOY_POSITION = (667, 540) # initial point position (width, height)
+VIDEO_PATH = "input video.mp4" # Load an image or video frame
 
 # Mouse callback function to capture the position of a click
 def get_mouse_click(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONDOWN:  # Left button click
         print(f"Point clicked: ({x}, {y})")
 
+<<<<<<< HEAD:find_initialbuoy.py
 # Load an image or video frame
 video_path = "stabilized.mp4"
 cap = cv2.VideoCapture(video_path)
+=======
+
+cap = cv2.VideoCapture(VIDEO_PATH)
+>>>>>>> 4a93f4c2388e13331be4c22f9ddaf7080192de41:motion_compensate/find_initialbuoy.py
 frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-start_time = 1000 #start the tracking from second 1
+start_time = 0 #start the tracking from second 1
 
 while cap.isOpened():
     ret, frame = cap.read()
@@ -35,7 +41,7 @@ while cap.isOpened():
         # Looping to display the image until 'q' is pressed
         while True:
             # Display the image
-            cv2.imshow("Initial Frame", frame)
+            cv2.imshow("Initial Frame", first_frame)
 
             # Press 'q' to exit the loop
             if cv2.waitKey(1) & 0xFF == ord('q'):
