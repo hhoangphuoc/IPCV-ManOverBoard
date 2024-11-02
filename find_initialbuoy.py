@@ -13,7 +13,7 @@ def get_mouse_click(event, x, y, flags, param):
         print(f"Point clicked: ({x}, {y})")
 
 # Load an image or video frame
-video_path = "project2/MAH01462.mp4"
+video_path = "stabilized.mp4"
 cap = cv2.VideoCapture(video_path)
 frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
