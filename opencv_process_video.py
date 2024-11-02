@@ -59,8 +59,67 @@ def apply_subtitle(frame, subtitle):
     line_type = cv2.LINE_AA
     cv2.putText(frame, subtitle, position, font, font_scale, font_color, thickness, line_type)
 
-# Function to process a zoomed ROI for circular object detection
-def overlay_zoomed_roi_debug(frame, roi, size, overlay_size=(200, 200), margin=10, threshold_value=150, min_circularity=0.8):
+
+def detect_horizon(frame,roi):
+    """
+    Detect horizon line using Hough transform by selecting the most horizontal line.
+
+    Parameters:
+        frame (np.array): Input frame to process.
+
+    Returns:
+        start (tuple): Begin (x1, y1) of the detected horizon line.
+        end (tuple: End coordinate (x2, y2) of the detected horizon
+    """
+
+    x, y, w, h = roi
+    w=400
+    h=50
+    # Extract the ROI from the frame
+    roi_frame = frame[y-h:y, x-int(w/2):x + int(w/2)]
+
+    # Convert frame to grayscale
+    gray = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2GRAY)
+
+    # Apply Gaussian blur to reduce noise
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+
+    # Detect edges using Canny edge detector
+    edges = cv2.Canny(blurred, 150, 200)
+
+    # Use Hough Line Transform to detect lines
+    lines = cv2.HoughLinesP(edges, 1, np.pi / 360, threshold=80, minLineLength=100, maxLineGap=300)
+
+    # Initialize variables to store the best (most horizontal) line
+    best_line = None
+    min_angle_diff = float('inf')
+
+    # Define target angle (horizontal) in radians
+    target_angle = 0  # Horizontal line has an angle of 0 degrees
+
+    if lines is not None:
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            # Calculate angle of the line
+            angle = np.arctan2(y2 - y1, x2 - x1)
+
+            # Find angle difference from horizontal
+            angle_diff = abs(angle - target_angle)
+            # Update best line if this one is closer to horizontal
+            if angle_diff < min_angle_diff:
+                min_angle_diff = angle_diff
+                best_line = (x1, y1, x2, y2)
+                print(best_line)
+
+    # Return the coordinates of the best line
+    start = (best_line[0], best_line[1])
+    end = (best_line[2], best_line[3])
+    # start=0
+    # end = 0
+    cv2.line(roi_frame, start, end, color=(0,0,255), thickness=2)
+    return start, end
+
+def overlay_zoomed_roi_debug(frame, roi, size, overlay_size=(200, 200), margin=10, threshold_value=170, min_circularity=0.78):
     """
     Extracts, resizes, and overlays the zoomed ROI on the bottom right corner of the frame,
     applies thresholding, and identifies the largest circular white object by its center of mass and size.
@@ -85,7 +144,7 @@ def overlay_zoomed_roi_debug(frame, roi, size, overlay_size=(200, 200), margin=1
     # Extract the ROI from the frame
     roi_frame = frame[y-int(h/2):y + int(h/2), x-int(w/2):x + int(w/2)]
 
-    # Resize the ROI to the fixed overlay size
+    # Resize the ROI to the fixed overlay size. For a 50x50 window, scaling would be 4x to accommodate 200x200
     zoomed_roi = cv2.resize(roi_frame, overlay_size, interpolation=cv2.INTER_CUBIC)
 
     # Calculate overlay position (bottom-right corner with margin)
@@ -133,12 +192,14 @@ def overlay_zoomed_roi_debug(frame, roi, size, overlay_size=(200, 200), margin=1
     # Overlay the zoomed ROI
     'Change "zoomed_roi" to "thresholded_frame_bgr" for developing purposes'
     frame[roi_y_start:roi_y_start + overlay_size[1], roi_x_start:roi_x_start + overlay_size[0]] = zoomed_roi
+    #frame[roi_y_start:roi_y_start + overlay_size[1], roi_x_start:roi_x_start + overlay_size[0]] = thresholded_frame_bgr
+
 
     # If a valid circular blob is found, update the ROI to center around the blob's COM
-    if center_of_mass and 1 <= largest_area <= 200:
+    if center_of_mass and 40 <= largest_area <= 260:
         # Calculate scale factors from overlay to original ROI size
         scale_x = w / overlay_size[0]
-        scale_y = 50 / overlay_size[1]
+        scale_y = h / overlay_size[1]
         print("Scale =", scale_x, scale_y)
 
         # Transform the COM from overlay to the original frame coordinates
@@ -147,14 +208,16 @@ def overlay_zoomed_roi_debug(frame, roi, size, overlay_size=(200, 200), margin=1
         print("COM OG =", original_cX, original_cY)
         center_of_mass = (original_cX, original_cY,w,h)
         cv2.circle(frame, (original_cX, original_cY), 2, (0, 0, 255), 3)
+        cv2.rectangle(frame, (original_cX-int(w/2),original_cY-int(h/2)),(original_cX+int(w/2),original_cY+int(h/2)),color=(0, 0, 100))
         apply_subtitle(frame, "Tracking!")
     else:
-        # Apply motion model here (Ho)
-        
+        # Apply motion model (or earlier) here (Ho)
+
         # Basic easy motion when it loses its target
         w = 100
         h = 50
         last_roi = (x, y, w, h)
+        cv2.rectangle(frame, (x - int(w/2), y - int(h/2)), (x + int(w/2), y + int(h/2)), color=(0, 0, 100))
         center_of_mass = last_roi
         #-----------------------
         apply_subtitle(frame, "Searching...")
@@ -171,7 +234,6 @@ def main(input_video_file: str, output_video_file: str) -> None:
     # Load templates for part 3f
     roi = cv2.imread('template/roi.png')
 
-
     # OpenCV video objects to work with
     cap = cv2.VideoCapture(input_video_file)
     fps = int(round(cap.get(5)))
@@ -186,7 +248,7 @@ def main(input_video_file: str, output_video_file: str) -> None:
         ret, frame = cap.read()
         frame_number += 1
         if not ret:
-            print("Could not read the 5th frame. Exiting.")
+            print("Could not read the 120th frame. Exiting.")
             cap.release()
             out.release()
             cv2.destroyAllWindows()
@@ -210,7 +272,10 @@ def main(input_video_file: str, output_video_file: str) -> None:
                 #frame = threshold_white_values(frame, roi)
                 pass
 
-            frame, roi = overlay_zoomed_roi_debug(frame, roi, (50, 50), overlay_size=(200, 200), margin=10)
+            frame, roi = overlay_zoomed_roi_debug(frame, roi, (50, 40), overlay_size=(200, 200), margin=10)
+            start_coord, end_coord = detect_horizon(frame, roi)
+
+            print(f"start={start_coord}, end={end_coord}")
 
             # write frame that you processed to output
             out.write(frame)
