@@ -112,13 +112,51 @@ def detect_horizon(frame,roi):
                 print(best_line)
 
     # Return the coordinates of the best line
-    start = (best_line[0], best_line[1])
-    end = (best_line[2], best_line[3])
+    start = (best_line[0] + x - int(w / 2), best_line[1] + (y - h))
+    end = (best_line[2] + x - int(w / 2), best_line[3] + (y - h))
     # start=0
     # end = 0
-    cv2.line(roi_frame, start, end, color=(0,0,255), thickness=2)
+    cv2.line(frame, start, end, color=(0,0,255), thickness=2)
     return start, end
 
+def estimate_distance(frame, y_0, focal_length = 1.25802359e+03, radius_earth = 6378100, camera_height = 2.5):
+    # Distance to horizon
+    D = np.sqrt((radius_earth+camera_height)**2 - radius_earth**2)
+
+    # Slope of line
+    m = y_0/focal_length
+
+    # Resulting quadratic
+    a = (1+m**2)
+    b = -2*D - 2*m*radius_earth
+    c = D**2
+
+    # Find z coordinate
+    z = (-b - np.sqrt(b**2-4*a*c))/(2*a)
+
+    # Corresponding y coordinate
+    y = m*z
+
+    # Define vectors and calculate angle between them
+    v1 = np.array([z-D,y-radius_earth])
+    v2 = np.array([-D,-radius_earth])
+    v1_norm = np.linalg.norm(v1)
+    v2_norm = np.linalg.norm(v2)
+    dot_product = np.dot(v1,v2)
+
+    # Calculate distance
+    theta = np.arccos(dot_product/(v1_norm*v2_norm))
+    distance = radius_earth*theta
+
+    # Write to frame
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    position = (int(frame.shape[1]/2)-200, frame.shape[0] - 50)
+    font_scale = 1
+    font_color = (255, 255, 255)
+    thickness = 2
+    line_type = cv2.LINE_AA
+    cv2.putText(frame, f"Distance to buoy: {distance:.2f} m", position, font, font_scale, font_color, thickness, line_type)
+    return frame, distance
 def overlay_zoomed_roi_debug(frame, roi, size, overlay_size=(200, 200), margin=10, threshold_value=170, min_circularity=0.78):
     """
     Extracts, resizes, and overlays the zoomed ROI on the bottom right corner of the frame,
@@ -210,6 +248,7 @@ def overlay_zoomed_roi_debug(frame, roi, size, overlay_size=(200, 200), margin=1
         cv2.circle(frame, (original_cX, original_cY), 2, (0, 0, 255), 3)
         cv2.rectangle(frame, (original_cX-int(w/2),original_cY-int(h/2)),(original_cX+int(w/2),original_cY+int(h/2)),color=(0, 0, 100))
         apply_subtitle(frame, "Tracking!")
+
     else:
         # Apply motion model (or earlier) here (Ho)
 
@@ -227,6 +266,7 @@ def overlay_zoomed_roi_debug(frame, roi, size, overlay_size=(200, 200), margin=1
         print(f"Scan size: {w},{h}")
 
     return frame, center_of_mass
+
 def main(input_video_file: str, output_video_file: str) -> None:
     # Interval for quick debug etc.
     interval = 1000
@@ -274,8 +314,13 @@ def main(input_video_file: str, output_video_file: str) -> None:
 
             frame, roi = overlay_zoomed_roi_debug(frame, roi, (50, 40), overlay_size=(200, 200), margin=10)
             start_coord, end_coord = detect_horizon(frame, roi)
-
             print(f"start={start_coord}, end={end_coord}")
+
+            # Estimate distance
+            horizon = (start_coord[1] + end_coord[1])/2
+            y0 = abs(horizon - roi[1])
+            frame, dist = estimate_distance(frame, y0)
+            print(f"Distance to buoy:{dist}")
 
             # write frame that you processed to output
             out.write(frame)
