@@ -13,14 +13,9 @@ def get_mouse_click(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONDOWN:  # Left button click
         print(f"Point clicked: ({x}, {y})")
 
-<<<<<<< HEAD:find_initialbuoy.py
 # Load an image or video frame
 video_path = "stabilized.mp4"
 cap = cv2.VideoCapture(video_path)
-=======
-
-cap = cv2.VideoCapture(VIDEO_PATH)
->>>>>>> 4a93f4c2388e13331be4c22f9ddaf7080192de41:motion_compensate/find_initialbuoy.py
 frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
