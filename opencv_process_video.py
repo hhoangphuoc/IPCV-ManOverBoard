@@ -157,7 +157,8 @@ def estimate_distance(frame, y_0, focal_length = 1.25802359e+03, radius_earth = 
     line_type = cv2.LINE_AA
     cv2.putText(frame, f"Distance to buoy: {distance:.2f} m", position, font, font_scale, font_color, thickness, line_type)
     return frame, distance
-def overlay_zoomed_roi_debug(frame, roi, size, overlay_size=(200, 200), margin=10, threshold_value=170, min_circularity=0.78):
+
+def overlay_zoomed_roi_debug(frame, roi, size, overlay_size=(200, 200), margin=10, threshold_value=170, min_circularity=0.76):
     """
     Extracts, resizes, and overlays the zoomed ROI on the bottom right corner of the frame,
     applies thresholding, and identifies the largest circular white object by its center of mass and size.
@@ -234,7 +235,7 @@ def overlay_zoomed_roi_debug(frame, roi, size, overlay_size=(200, 200), margin=1
 
 
     # If a valid circular blob is found, update the ROI to center around the blob's COM
-    if center_of_mass and 40 <= largest_area <= 260:
+    if center_of_mass and 25 <= largest_area <= 260:
         # Calculate scale factors from overlay to original ROI size
         scale_x = w / overlay_size[0]
         scale_y = h / overlay_size[1]
@@ -245,15 +246,14 @@ def overlay_zoomed_roi_debug(frame, roi, size, overlay_size=(200, 200), margin=1
         original_cY = int(center_of_mass[1] * scale_y) + y - int(h/2)
         print("COM OG =", original_cX, original_cY)
         center_of_mass = (original_cX, original_cY,w,h)
-        cv2.circle(frame, (original_cX, original_cY), 2, (0, 0, 255), 3)
-        cv2.rectangle(frame, (original_cX-int(w/2),original_cY-int(h/2)),(original_cX+int(w/2),original_cY+int(h/2)),color=(0, 0, 100))
+        #cv2.circle(frame, (original_cX, original_cY), 2, (0, 0, 255), 3)
+        cv2.rectangle(frame, (original_cX-int(w/2),original_cY-int(h/2)),(original_cX+int(w/2),original_cY+int(h/2)),color=(0, 0, 255))
         apply_subtitle(frame, "Tracking!")
-
     else:
         # Apply motion model (or earlier) here (Ho)
 
         # Basic easy motion when it loses its target
-        w = 100
+        w = 60
         h = 50
         last_roi = (x, y, w, h)
         cv2.rectangle(frame, (x - int(w/2), y - int(h/2)), (x + int(w/2), y + int(h/2)), color=(0, 0, 100))
@@ -266,14 +266,7 @@ def overlay_zoomed_roi_debug(frame, roi, size, overlay_size=(200, 200), margin=1
         print(f"Scan size: {w},{h}")
 
     return frame, center_of_mass
-
 def main(input_video_file: str, output_video_file: str) -> None:
-    # Interval for quick debug etc.
-    interval = 1000
-    offset = 250
-    # Load templates for part 3f
-    roi = cv2.imread('template/roi.png')
-
     # OpenCV video objects to work with
     cap = cv2.VideoCapture(input_video_file)
     fps = int(round(cap.get(5)))
@@ -284,7 +277,7 @@ def main(input_video_file: str, output_video_file: str) -> None:
 
     # Skip to the 120th frame
     frame_number = 0
-    while frame_number < 120:
+    while frame_number < 1:
         ret, frame = cap.read()
         frame_number += 1
         if not ret:
@@ -295,9 +288,10 @@ def main(input_video_file: str, output_video_file: str) -> None:
             return
 
     # Allow the user to select the ROI on the 5th frame
-    frame = apply_sobel(frame)
-    roi = cv2.selectROI("Select ROI", frame, fromCenter=False, showCrosshair=True)
-    cv2.destroyWindow("Select ROI")
+    #frame = apply_sobel(frame)
+    #roi = cv2.selectROI("Select ROI", frame, fromCenter=False, showCrosshair=True)
+    #cv2.destroyWindow("Select ROI")
+    roi = (655, 532,0,0)
 
     # while loop where the real work happens
     while cap.isOpened():
@@ -306,13 +300,14 @@ def main(input_video_file: str, output_video_file: str) -> None:
             if cv2.waitKey(28) & 0xFF == ord('q'):
                 break
             # Part 1
-            if between(cap, 0, 10000):
+            if between(cap, 0, 20000):
                 #track_with_csrt(cap, first_frame, roi)
                 #frame = draw_white_circles_in_canny(frame, roi)
                 #frame = threshold_white_values(frame, roi)
                 pass
 
-            frame, roi = overlay_zoomed_roi_debug(frame, roi, (50, 40), overlay_size=(200, 200), margin=10)
+            # Find Object and horizon
+            frame, roi = overlay_zoomed_roi_debug(frame, roi, (50, 30), overlay_size=(200, 200), margin=10)
             start_coord, end_coord = detect_horizon(frame, roi)
             print(f"start={start_coord}, end={end_coord}")
 
