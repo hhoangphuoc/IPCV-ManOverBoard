@@ -16,7 +16,7 @@ def print_hi(name):
 if __name__ == '__main__':
     #input_video = "input/stabilized_video.MP4"   # Make sure the input video file is in the correct location
     input_video = "input/stabilized_video.MP4"  # Make sure the input video file is in the correct location
-    output_video = "project_stabilized.mp4"  # The processed video will be saved as this file
+    output_video = "output/project_buoy_tracking.mp4"  # The processed video will be saved as this file
     opencv_process_video.main(input_video, output_video)
     #stabilisation()
 
