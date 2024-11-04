@@ -144,7 +144,7 @@ def detect_horizon(frame,roi):
     cv2.line(frame, start, end, color=(0,0,255), thickness=2)
     return start, end
 
-def estimate_distance(frame, y_0, focal_length = 1.25802359e+03, radius_earth = 6378100, camera_height = 2.5):
+def estimate_distance(frame, y_0, focal_length = 1.67514300e+03, radius_earth = 6378100, camera_height = 2.5):
     # Distance to horizon
     D = np.sqrt((radius_earth+camera_height)**2 - radius_earth**2)
 
