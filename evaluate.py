@@ -30,9 +30,13 @@ def calculate_iou(box1, box2):
     # Calculate the area of both bounding boxes
     box1_area = w1 * h1
     box2_area = w2 * h2
+    union_area = box1_area + box2_area - inter_area
 
+    if union_area == 0:
+        return 0.0
     # Calculate IOU
-    iou = inter_area / float(box1_area + box2_area - inter_area)
+    iou = inter_area / float(union_area)
+
     return iou
 def evaluate_tracking(
         video_path, 
@@ -115,15 +119,15 @@ def evaluate_tracking(
             center_distances.append(distance)
 
             # calculate iou
-            gt_box = (int(gt_x - tracked_w/2), int(gt_y - tracked_h/2), tracked_w, tracked_h)  # Ground truth box
-            print(f"Ground truth box: {gt_box}")
-            # tracked_box = roi
-            tracked_box = (tracked_x, tracked_y, tracked_w, tracked_h)
+            gt_rect = (int(gt_x - tracked_w/2), int(gt_y - tracked_h/2), tracked_w, tracked_h)  # Ground truth box
+            print(f"Ground truth box: {gt_rect}")
+            tracked_box = roi
             print(f"Tracked box: {tracked_box}")
 
             # draw gt box and tracked box
-            cv2.rectangle(frame, gt_box, (0, 255, 0), 2) #green
+            cv2.rectangle(frame, gt_rect, (0, 255, 0), 2) #green
 
+            gt_box = (gt_x, gt_y, tracked_w, tracked_h)
             iou = calculate_iou(gt_box, tracked_box) #calculate iou
             ious.append(iou)
 
