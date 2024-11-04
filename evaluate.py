@@ -3,6 +3,9 @@ import numpy as np
 import json
 from opencv_process_video import overlay_zoomed_roi_debug, detect_horizon, estimate_distance
 from evaluation.evaluate_params import AVERAGE_DISTANCE_ERROR, SUCCESS_RATE, AVERAGE_IOU, STD_DEV_DISTANCE, STD_DEV_IOU
+
+import matplotlib.pyplot as plt
+
 def calculate_iou(box1, box2):
     """
     Calculates the Intersection over Union (IOU) 
@@ -179,20 +182,49 @@ def evaluate_tracking(
     avg_iou = np.mean(ious)
     std_dev_iou = np.std(ious)
 
-    return avg_distance_error, success_rate, avg_iou, std_dev_distance, std_dev_iou
+    return center_distances, ious,avg_distance_error, success_rate, avg_iou, std_dev_distance, std_dev_iou
 
 
 if __name__ == '__main__':
     video_path = 'input/stabilized.mp4'  # Replace with your video file path
     ground_truth_path = 'evaluation/ground_truth.json'  # Replace with your ground truth file path
 
-    avg_error, success_rate, avg_iou, std_dev_distance, std_dev_iou = evaluate_tracking(video_path, ground_truth_path)
+    center_distances, ious, avg_error, success_rate, avg_iou, std_dev_distance, std_dev_iou = evaluate_tracking(video_path, ground_truth_path)
 
     # print(f"Average Center Distance Error: {avg_error:.2f} pixels")
     # print(f"Tracking Success Rate: {success_rate:.2f}%")
     # print(f"Average IOU: {avg_iou:.2f}")
     # print(f"Standard Deviation of Center Distance: {std_dev_distance:.2f} pixels")
     # print(f"Standard Deviation of IOU: {std_dev_iou:.2f}")
+
+    # plot the center distances, ious in one plot
+    # Plot combined metrics
+    plt.figure(figsize=(10, 5))
+    plt.title('Combined Metrics: Distance Differences and IOU')
+    plt.plot(center_distances,  label='Center Distances')
+    plt.plot(ious, label='IOUs')
+    plt.legend()
+    plt.savefig('combined_metrics.png')
+    plt.close()
+
+    # Plot center distances separately
+    plt.figure(figsize=(10, 5))
+    plt.title('Center Distances Over Time')
+    plt.plot(center_distances, 'orange', label='Center Distances')
+    plt.ylabel('Distance (pixels)')
+    plt.xlabel('Frame')
+    plt.savefig('center_distances.png')
+    plt.close()
+
+    # Plot IOUs separately
+    plt.figure(figsize=(10, 5))
+    plt.title('Intersection Over Union (IOU) Over Time')
+    plt.plot(ious, 'blue', label='IOU')
+    plt.ylabel('IOU')
+    plt.xlabel('Frame')
+    plt.savefig('iou_metrics.png')
+    plt.close()
+
 
     # UPDATE THE GLOBAL VARIABLES
     AVERAGE_DISTANCE_ERROR = avg_error
