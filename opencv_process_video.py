@@ -8,31 +8,6 @@ import cv2
 import sys
 import numpy as np
 
-# Initialize Kalman Filter
-kalman = cv2.KalmanFilter(4, 2)  # 4 dynamic parameters (x, y, dx, dy), 2 measurement parameters (x, y)
-kalman.measurementMatrix = np.array([[1, 0, 0, 0],
-                                   [0, 1, 0, 0]], np.float32)
-kalman.transitionMatrix = np.array([[1, 0, 1, 0],
-                                   [0, 1, 0, 1],
-                                   [0, 0, 1, 0],
-                                   [0, 0, 0, 1]], np.float32)
-kalman.processNoiseCov = np.array([[1, 0, 0, 0],
-                                  [0, 1, 0, 0],
-                                  [0, 0, 1, 0],
-                                  [0, 0, 0, 1]], np.float32) * 0.03
-
-# Global variables to track previous positions
-prev_positions = []
-is_initialized = False
-
-# Global variables to track previous frames
-prev_frame = None
-prev_gray = None
-
-# Add these as global variables
-last_valid_position = None
-last_valid_frame = None
-
 # Helper function to determine if the current frame's time is within a specified interval
 def between(cap, lower: int, upper: int) -> bool:
     """
@@ -183,90 +158,7 @@ def estimate_distance(frame, y_0, focal_length = 1.67514300e+03, radius_earth = 
     cv2.putText(frame, f"Distance to buoy: {distance:.2f} m", position, font, font_scale, font_color, thickness, line_type)
     return frame, distance
 
-def compensate_motion(current_frame, prev_frame, roi):
-    """
-    Enhanced motion compensation focusing on ROI and handling different motion types
-    """
-    if prev_frame is None:
-        return current_frame, None, None
-    
-    x, y, w, h = roi
-    
-    # Convert frames to grayscale
-    curr_gray = cv2.cvtColor(current_frame, cv2.COLOR_BGR2GRAY)
-    prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
-    # Calculate optical flow using Farneback method
-    # flow = cv2.calcOpticalFlowFarneback(prev_gray, curr_gray, None, 
-    #                                   pyr_scale=0.5, levels=3, winsize=15, 
-    #                                   iterations=3, poly_n=5, poly_sigma=1.2, 
-    #                                   flags=0)
-    # Extract ROI for focused motion analysis
-    roi_curr = curr_gray[y-int(h/2):y+int(h/2), x-int(w/2):x+int(w/2)]
-    roi_prev = prev_gray[y-int(h/2):y+int(h/2), x-int(w/2):x+int(w/2)]
-    # # Create motion compensation matrix
-    # h, w = current_frame.shape[:2]
-    # y_coords, x_coords = np.mgrid[0:h, 0:w].reshape(2, -1)
-    # coords = np.vstack((x_coords, y_coords))
-    # Detect key points in ROI
-    orb = cv2.ORB_create(nfeatures=500)
-    kp1, des1 = orb.detectAndCompute(roi_prev, None)
-    kp2, des2 = orb.detectAndCompute(roi_curr, None)
-    
-    if des1 is None or des2 is None or len(kp1) < 2 or len(kp2) < 2:
-        return current_frame, None, None
-    # # Apply flow to coordinates
-    # flow_coords = coords + flow.reshape(2, -1)
-    # Match key points
-    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
-    matches = bf.match(des1, des2)
-    matches = sorted(matches, key=lambda x: x.distance)
-    
-    # Extract matched point coordinates
-    src_pts = np.float32([kp1[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
-    dst_pts = np.float32([kp2[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
-        # Create transformation matrix
-    # transformation_matrix = cv2.estimateAffinePartial2D(
-    #     coords.T.reshape(-1, 1, 2),
-    #     flow_coords.T.reshape(-1, 1, 2),
-    #     method=cv2.RANSAC,
-    #     ransacReprojThreshold=3,
-    #     maxIters=2000
-    # )[0]
-    # Adjust points to global frame coordinates
-    src_pts += np.float32([x-int(w/2), y-int(h/2)])
-    dst_pts += np.float32([x-int(w/2), y-int(h/2)])
-    
-    # Calculate dominant motion vector in ROI
-    if len(matches) >= 4:
-        # Estimate rigid transformation (rotation + translation)
-        transformation_matrix, inliers = cv2.estimateAffinePartial2D(
-            src_pts, dst_pts, method=cv2.RANSAC, 
-            ransacReprojThreshold=3, maxIters=2000
-        )
-        if transformation_matrix is not None:
-            # Decompose transformation to get dominant vertical motion
-            scale = np.sqrt(transformation_matrix[0,0]**2 + transformation_matrix[0,1]**2)
-            angle = np.arctan2(transformation_matrix[0,1], transformation_matrix[0,0])
-            translation = transformation_matrix[:, 2]
-            # return compensated_frame, transformation_matrix
-            # Create compensation matrix focusing on vertical motion
-            compensation_matrix = np.array([
-                [np.cos(angle), -np.sin(angle), translation[0]],
-                [np.sin(angle), np.cos(angle), translation[1]]
-            ], dtype=np.float32)
-            
-            # Apply compensation
-            h, w = current_frame.shape[:2]
-            compensated_frame = cv2.warpAffine(current_frame, compensation_matrix, (w, h))
-            
-            # Calculate wave motion vector
-            wave_motion = np.median(dst_pts - src_pts, axis=0).flatten()
-            
-            return compensated_frame, compensation_matrix, wave_motion
-    
-    return current_frame, None, None
-
-def overlay_zoomed_roi_debug(frame, roi, size, overlay_size=(200, 200), margin=10, threshold_value=170, min_circularity=0.76):
+def overlay_zoomed_roi_debug(frame, roi, size, missed_frame_count,overlay_size=(200, 200), margin=10, threshold_value=170, min_circularity=0.76):
     """
     Extracts, resizes, and overlays the zoomed ROI on the bottom right corner of the frame,
     applies thresholding, and identifies the largest circular white object by its center of mass and size.
@@ -282,54 +174,15 @@ def overlay_zoomed_roi_debug(frame, roi, size, overlay_size=(200, 200), margin=1
 
     Returns:
         frame (np.array): The frame with the overlay applied.
-        center_of_mass (tuple): Coordinates (x, y) of the largest circular white blob's center of mass in the overlay.
+        center_of_mass (tuple): Coordinates (x, y,w,h) of the largest circular white blob's center of mass in the overlay.
     """
-    #Global variables to apply Kalman Filter for
-    # tracking the buoy based on previous positions
-    global kalman, prev_positions, is_initialized, prev_frame, last_valid_position, last_valid_frame
-    
-    # Motion compensation with wave motion analysis
-    compensated_frame, transform_matrix, wave_motion = compensate_motion(frame.copy(), prev_frame, roi)
-    
-    # Store current frame for next iteration
-    prev_frame = frame.copy()
-    
-    # If we have wave motion information, adjust Kalman filter parameters
-    if wave_motion is not None:
-        # Adjust process noise based on wave motion magnitude
-        wave_magnitude = np.linalg.norm(wave_motion)
-        kalman.processNoiseCov = np.array([[1, 0, 0, 0],
-                                         [0, 1, 0, 0],
-                                         [0, 0, 1, 0],
-                                         [0, 0, 0, 1]], np.float32) * (0.03 * wave_magnitude)
-        
-        # Update transition matrix to favor vertical motion
-        kalman.transitionMatrix = np.array([[1, 0, 0.1, 0],
-                                          [0, 1, 0, 0.9],  # Increased weight for vertical motion
-                                          [0, 0, 0.1, 0],
-                                          [0, 0, 0, 0.9]], np.float32)
-    
-    # Adjust previous positions based on wave motion compensation
-    if transform_matrix is not None and prev_positions:
-        adjusted_positions = []
-        for pos in prev_positions:
-            pt = np.array([[pos[0], pos[1], 1]], dtype=np.float32).T
-            transformed_pt = np.dot(transform_matrix, pt)
-            adjusted_positions.append((int(transformed_pt[0]), int(transformed_pt[1])))
-        prev_positions = adjusted_positions
-
-    # Extract ROI from motion-compensated frame
     x, y, w, h = roi
-    # w,h = size
-    # print(f"ROI (Original coordinates): {x, y}")
+    w,h = size
+    print(f"ROI (Original coordinates): {x, y}")
 
-    # # Extract the ROI from the frame
-    # roi_frame = frame[y-int(h/2):y + int(h/2), x-int(w/2):x + int(w/2)]
+    # Extract the ROI from the frame
+    roi_frame = frame[y-int(h/2):y + int(h/2), x-int(w/2):x + int(w/2)]
 
-    w, h = size
-    # Extract the ROI from the compensated frame
-    roi_frame = compensated_frame[y-int(h/2):y + int(h/2), x-int(w/2):x + int(w/2)]
-    
     # Resize the ROI to the fixed overlay size. For a 50x50 window, scaling would be 4x to accommodate 200x200
     zoomed_roi = cv2.resize(roi_frame, overlay_size, interpolation=cv2.INTER_CUBIC)
 
@@ -377,11 +230,11 @@ def overlay_zoomed_roi_debug(frame, roi, size, overlay_size=(200, 200), margin=1
 
     # Overlay the zoomed ROI
     'Change "zoomed_roi" to "thresholded_frame_bgr" for developing purposes'
-    frame[roi_y_start:roi_y_start + overlay_size[1], roi_x_start:roi_x_start + overlay_size[0]] = zoomed_roi
-    #frame[roi_y_start:roi_y_start + overlay_size[1], roi_x_start:roi_x_start + overlay_size[0]] = thresholded_frame_bgr
+    #frame[roi_y_start:roi_y_start + overlay_size[1], roi_x_start:roi_x_start + overlay_size[0]] = zoomed_roi
+    frame[roi_y_start:roi_y_start + overlay_size[1], roi_x_start:roi_x_start + overlay_size[0]] = thresholded_frame_bgr
 
 
-    # If a valid circular blob is found, update tracking with compensated coordinates
+    # If a valid circular blob is found, update the ROI to center around the blob's COM
     if center_of_mass and 25 <= largest_area <= 260:
         # Calculate scale factors from overlay to original ROI size
         scale_x = w / overlay_size[0]
@@ -392,89 +245,27 @@ def overlay_zoomed_roi_debug(frame, roi, size, overlay_size=(200, 200), margin=1
         original_cX = int(center_of_mass[0] * scale_x) + x - int(w/2)
         original_cY = int(center_of_mass[1] * scale_y) + y - int(h/2)
         print("COM OG =", original_cX, original_cY)
-        # center_of_mass = (original_cX, original_cY,w,h)
-        
-        # Store last valid position and frame for future reference
-        last_valid_position = (original_cX, original_cY)
-        last_valid_frame = frame.copy()
-        
-        # Update Kalman Filter with measurement
-        measurement = np.array([[np.float32(original_cX)], [np.float32(original_cY)]])
-        
-        if not is_initialized:
-            kalman.statePre = np.array([[np.float32(original_cX)], 
-                                      [np.float32(original_cY)],
-                                      [0], [0]], np.float32)
-            kalman.statePost = kalman.statePre.copy()
-            is_initialized = True
-        
-        kalman.correct(measurement)
-        
-        # Draw tracking visualization
-        cv2.rectangle(frame, (original_cX-int(w/2), original_cY-int(h/2)),
-                     (original_cX+int(w/2), original_cY+int(h/2)), color=(0, 0, 255))
-        apply_subtitle(frame, "Buoy visible! Tracking...")
-
-        center_of_mass = (original_cX, original_cY, w, h)
-        
-        #-------------------------------End of update -------------------------
-        
+        center_of_mass = (original_cX, original_cY,w,h)
+        #cv2.circle(frame, (original_cX, original_cY), 2, (0, 0, 255), 3)
+        cv2.rectangle(frame, (original_cX-int(w/2),original_cY-int(h/2)),(original_cX+int(w/2),original_cY+int(h/2)),color=(0, 0, 255),thickness=2)
+        apply_subtitle(frame, "Tracking!")
     else:
-        print("No valid blob found - Using last known position and motion compensation")
-        if last_valid_position and last_valid_frame is not None:
-            # Perform motion compensation between last valid frame and current frame
-            compensated_frame, transform_matrix, wave_motion = compensate_motion(frame.copy(), last_valid_frame, roi)
-            
-            if transform_matrix is not None:
-                # Transform last valid position using motion compensation
-                last_x, last_y = last_valid_position
-                pt = np.array([[last_x, last_y, 1]], dtype=np.float32).T
-                transformed_pt = np.dot(transform_matrix, pt)
-                
-                predicted_x = int(transformed_pt[0])
-                predicted_y = int(transformed_pt[1])
-                
-                # Apply vertical motion bias (buoys tend to move more vertically)
-                if wave_motion is not None:
-                    # Apply only a portion of the vertical wave motion
-                    predicted_y += int(wave_motion[1] * 0.1)  # Reduced influence of wave motion
-                    print("Predicted y =", predicted_y)
-
-                    # Remove the horizontal wave motion
-                    # predicted_x += int(wave_motion[0] * 0.0)
-                
-                # Bounds checking
-                predicted_x = max(int(w/2), min(frame.shape[1]-int(w/2), predicted_x))
-                predicted_y = max(int(h/2), min(frame.shape[0]-int(h/2), predicted_y))
-                
-                # Draw predicted position
-                cv2.rectangle(frame, (predicted_x-int(w/2), predicted_y-int(h/2)),
-                             (predicted_x+int(w/2), predicted_y+int(h/2)), color=(0, 255, 255))
-                
-                center_of_mass = (predicted_x, predicted_y, w, h)
-                apply_subtitle(frame, "Predicting!")
-            else:
-                # If motion compensation fails, use last known position
-                last_x, last_y = last_valid_position
-                cv2.rectangle(frame, (last_x-int(w/2), last_y-int(h/2)),
-                             (last_x+int(w/2), last_y+int(h/2)), color=(255, 165, 0))
-                center_of_mass = (last_x, last_y, w, h)
-                apply_subtitle(frame, "Buoy invisible! Predicting...")
-        else:
-            # Fallback to original search behavior
-            w = 60
-            h = 50
-            center_of_mass = (x, y, w, h)
-            cv2.rectangle(frame, (x-int(w/2), y-int(h/2)),
-                         (x+int(w/2), y+int(h/2)), color=(0, 0, 100))
-            apply_subtitle(frame, "Searching...")
-
+        # Apply motion model (or earlier) here (Ho)
+        missed_frame_count += 1
+        # Basic easy motion when it loses its target
+        w = 60
+        h = 50
+        last_roi = (x, y, w, h)
+        cv2.rectangle(frame, (x - int(w/2), y - int(h/2)), (x + int(w/2), y + int(h/2)), color=(0, 0, 100),thickness=2)
+        center_of_mass = last_roi
+        #-----------------------
+        apply_subtitle(frame, "Searching...")
     # Print the center of mass and area of the largest blob
     if center_of_mass:
         print(f"Center of Mass: {center_of_mass}, Area: {largest_area}")
         print(f"Scan size: {w},{h}")
 
-    return frame, center_of_mass
+    return frame, center_of_mass, missed_frame_count
 def main(input_video_file: str, output_video_file: str) -> None:
     # OpenCV video objects to work with
     cap = cv2.VideoCapture(input_video_file)
@@ -500,7 +291,10 @@ def main(input_video_file: str, output_video_file: str) -> None:
     #frame = apply_sobel(frame)
     #roi = cv2.selectROI("Select ROI", frame, fromCenter=False, showCrosshair=True)
     #cv2.destroyWindow("Select ROI")
+
+    # Initialize
     roi = (655, 532,0,0)
+    missed_frame_count = 0
 
     # while loop where the real work happens
     while cap.isOpened():
@@ -516,9 +310,10 @@ def main(input_video_file: str, output_video_file: str) -> None:
                 pass
 
             # Find Object and horizon
-            frame, roi = overlay_zoomed_roi_debug(frame, roi, (50, 30), overlay_size=(200, 200), margin=10)
+            frame, roi, missed_frame_count = overlay_zoomed_roi_debug(frame, roi, (50, 30),missed_frame_count, overlay_size=(200, 200), margin=10, threshold_value=170,min_circularity=0.76)
             start_coord, end_coord = detect_horizon(frame, roi)
             print(f"start={start_coord}, end={end_coord}")
+            print(f"Count of frames where tracking is lost={missed_frame_count}")
 
             # Estimate distance
             horizon = (start_coord[1] + end_coord[1])/2
