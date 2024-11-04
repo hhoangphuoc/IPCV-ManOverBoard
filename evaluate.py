@@ -2,7 +2,38 @@ import cv2
 import numpy as np
 import json
 from opencv_process_video import overlay_zoomed_roi_debug, detect_horizon, estimate_distance
-from evaluation.evaluate_params import AVERAGE_DISTANCE_ERROR, SUCCESS_RATE
+from evaluation.evaluate_params import AVERAGE_DISTANCE_ERROR, SUCCESS_RATE, AVERAGE_IOU, STD_DEV_DISTANCE, STD_DEV_IOU
+def calculate_iou(box1, box2):
+    """
+    Calculates the Intersection over Union (IOU) 
+    between two bounding boxes.
+
+    Args:
+        box1 (tuple): (x1, y1, w1, h1) of the first box.
+        box2 (tuple): (x2, y2, w2, h2) of the second box.
+
+    Returns:
+        float: IOU value.
+    """
+    x1, y1, w1, h1 = box1
+    x2, y2, w2, h2 = box2
+
+    # Calculate the (x, y) coordinates of the intersection rectangle
+    inter_x1 = max(x1, x2)
+    inter_y1 = max(y1, y2)
+    inter_x2 = min(x1 + w1, x2 + w2)
+    inter_y2 = min(y1 + h1, y2 + h2)
+
+    # Calculate the area of intersection rectangle
+    inter_area = max(0, inter_x2 - inter_x1) * max(0, inter_y2 - inter_y1)
+
+    # Calculate the area of both bounding boxes
+    box1_area = w1 * h1
+    box2_area = w2 * h2
+
+    # Calculate IOU
+    iou = inter_area / float(box1_area + box2_area - inter_area)
+    return iou
 def evaluate_tracking(
         video_path, 
         ground_truth_path, 
@@ -25,7 +56,7 @@ def evaluate_tracking(
     frame_width = int(cap.get(3))
     frame_height = int(cap.get(4))
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # saving output video as .mp4
-    out = cv2.VideoWriter('output.mp4', fourcc, fps, (frame_width, frame_height))
+    out = cv2.VideoWriter('evaluation/evaluate_output.mp4', fourcc, fps, (frame_width, frame_height))
 
     # Skip to the 120th frame
     frame_number = 0
@@ -48,6 +79,7 @@ def evaluate_tracking(
     center_distances = []
     success_count = 0
     total_frames = 0
+    ious = [] #number of frames where iou is greater than 0.5
 
     while cap.isOpened():
         ret, frame = cap.read()
@@ -68,22 +100,50 @@ def evaluate_tracking(
             frame, dist = estimate_distance(frame, y0)
             # print(f"Distance to buoy:{dist}")
 
-            # write frame that you processed to output
-            out.write(frame)
-
-            # (optional) display the resulting frame
-            cv2.imshow('Frame', frame)
-
             gt_x, gt_y = ground_truth[str(frame_idx)]
-            tracked_x, tracked_y, _, _ = roi 
+            tracked_x, tracked_y, tracked_w, tracked_h = roi 
 
-            distance = np.sqrt((gt_x - tracked_x)**2 + (gt_y - tracked_y)**2)
+            # draw ground truth
+            cv2.circle(frame, (gt_x, gt_y), 5, (0, 255, 0), 1) #green
+            # draw tracked
+            cv2.circle(frame, (tracked_x, tracked_y), 5, (0, 0, 255), 1) #red
+
+            distance = np.sqrt(abs(gt_x - tracked_x)**2 + abs(gt_y - tracked_y)**2)
+            # draw distance
+            cv2.putText(frame, f"Distance: {distance:.2f} pixels", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
             center_distances.append(distance)
+
+            # calculate iou
+            gt_box = (int(gt_x - tracked_w/2), int(gt_y - tracked_h/2), tracked_w, tracked_h)  # Ground truth box
+            print(f"Ground truth box: {gt_box}")
+            # tracked_box = roi
+            tracked_box = (tracked_x, tracked_y, tracked_w, tracked_h)
+            print(f"Tracked box: {tracked_box}")
+
+            # draw gt box and tracked box
+            cv2.rectangle(frame, gt_box, (0, 255, 0), 2) #green
+
+            iou = calculate_iou(gt_box, tracked_box) #calculate iou
+            ious.append(iou)
 
             if distance <= threshold:
                 success_count += 1
 
             total_frames += 1
+
+            # draw iou
+            cv2.putText(frame, f"IOU: {iou:.2f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            # draw success rate
+            cv2.putText(frame, f"Success: {success_count}/{total_frames}", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            # draw frame number
+            cv2.putText(frame, f"Frame: {frame_idx}", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+            # write frame that you processed to output
+            out.write(frame)
+
+            # (optional) display the resulting frame
+            cv2.imshow('Frame', frame)
 
             key = cv2.waitKey(0)  # Wait indefinitely until a key is pressed
 
@@ -104,24 +164,42 @@ def evaluate_tracking(
     # Closes all the frames
     cv2.destroyAllWindows()
 
+    # Calculate average distance error
     avg_distance_error = np.mean(center_distances)
+    std_dev_distance = np.std(center_distances)
+
+    # Calculate success rate
     success_rate = (success_count / total_frames) * 100
 
-    return avg_distance_error, success_rate
+    # Calculate iou
+    avg_iou = np.mean(ious)
+    std_dev_iou = np.std(ious)
+
+    return avg_distance_error, success_rate, avg_iou, std_dev_distance, std_dev_iou
 
 
 if __name__ == '__main__':
     video_path = 'input/stabilized.mp4'  # Replace with your video file path
-    ground_truth_path = 'evaluate/ground_truth.json'  # Replace with your ground truth file path
+    ground_truth_path = 'evaluation/ground_truth.json'  # Replace with your ground truth file path
 
-    avg_error, success_rate = evaluate_tracking(video_path, ground_truth_path)
+    avg_error, success_rate, avg_iou, std_dev_distance, std_dev_iou = evaluate_tracking(video_path, ground_truth_path)
 
-    print(f"Average Center Distance Error: {avg_error:.2f} pixels")
-    print(f"Tracking Success Rate: {success_rate:.2f}%")
+    # print(f"Average Center Distance Error: {avg_error:.2f} pixels")
+    # print(f"Tracking Success Rate: {success_rate:.2f}%")
+    # print(f"Average IOU: {avg_iou:.2f}")
+    # print(f"Standard Deviation of Center Distance: {std_dev_distance:.2f} pixels")
+    # print(f"Standard Deviation of IOU: {std_dev_iou:.2f}")
 
     # UPDATE THE GLOBAL VARIABLES
     AVERAGE_DISTANCE_ERROR = avg_error
     SUCCESS_RATE = success_rate
+    AVERAGE_IOU = avg_iou
+    STD_DEV_DISTANCE = std_dev_distance
+    STD_DEV_IOU = std_dev_iou
 
     print(f"Average Center Distance Error: {AVERAGE_DISTANCE_ERROR:.2f} pixels")
     print(f"Tracking Success Rate: {SUCCESS_RATE:.2f}%")
+    print(f"Average IOU: {AVERAGE_IOU:.2f}")
+    print(f"Standard Deviation of Center Distance: {STD_DEV_DISTANCE:.2f} pixels")
+    print(f"Standard Deviation of IOU: {STD_DEV_IOU:.2f}")
+
