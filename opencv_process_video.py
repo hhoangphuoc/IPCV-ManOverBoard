@@ -230,8 +230,8 @@ def overlay_zoomed_roi_debug(frame, roi, size, missed_frame_count,overlay_size=(
 
     # Overlay the zoomed ROI
     'Change "zoomed_roi" to "thresholded_frame_bgr" for developing purposes'
-    #frame[roi_y_start:roi_y_start + overlay_size[1], roi_x_start:roi_x_start + overlay_size[0]] = zoomed_roi
-    frame[roi_y_start:roi_y_start + overlay_size[1], roi_x_start:roi_x_start + overlay_size[0]] = thresholded_frame_bgr
+    frame[roi_y_start:roi_y_start + overlay_size[1], roi_x_start:roi_x_start + overlay_size[0]] = zoomed_roi
+    #frame[roi_y_start:roi_y_start + overlay_size[1], roi_x_start:roi_x_start + overlay_size[0]] = thresholded_frame_bgr
 
 
     # If a valid circular blob is found, update the ROI to center around the blob's COM
